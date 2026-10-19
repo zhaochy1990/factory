@@ -1,0 +1,17 @@
+{
+  "suite": "qa-harness/miniprogram",
+  "startedAt": "2026-10-19T05:35:22.614Z",
+  "finishedAt": "2026-10-19T05:35:35.928Z",
+  "cases": [
+    {
+      "name": "M1 启动 → 首页渲染（本地栈）",
+      "status": "failed",
+      "steps": "automator.launch(.workspace) → 等首页渲染 → 断言页面路径+根节点 → 校验 [http] 日志 → 截图",
+      "expected": "页面 ∈ {coach,login,onboarding}；根节点渲染；HTTP 打本地 api-gateway 且零生产域名",
+      "actual": "停在 pages/login/login",
+      "evidence": "harness/miniprogram/test-results/m1-failure.png；console 尾部: [auth] 免密登录（token_exchange）… ⏎ [auth] 免密登录没成功（未绑定 / 网络）→ 去登录页 ⏎ [auth] wx.login 调用失败（appid / 登录态问题），后续请求不会发出: {\"errMsg\":\"login:fail 系统错误，错误码：41002,appid missing [20261019 13:33:00]\"} ⏎ [auth] 免密登录失败 code=- {\"errMsg\":\"login:fail 系统错误，错误码：41002,appid missing [20261019 13:33:00]\"} ⏎ [auth] silent login failed: {\"errMsg\":\"login:fail 系统错误，错误码：41002,appid missing [20261019 13:33:00]\"}",
+      "error": "console 未见任何 [http] 日志 — 小程序没有发起真实网络请求",
+      "durationMs": 13292
+    }
+  ]
+}

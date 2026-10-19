@@ -18,6 +18,7 @@ services:
       GIT_CONFIG_GLOBAL: /workspace/factory/config/gitconfig
     volumes:
       - openclaw-state:/home/node/.openclaw
+      - claude-home:/home/node/.claude
       - .:/workspace/factory
       - ${RUNNING_REPO:-/Users/zhaochaoyi/workspace/stride/running}:/workspace/running
       - ${CLAUDE_SKILLS_DIR:-/Users/zhaochaoyi/.claude/skills}:/home/node/.claude/skills:ro
@@ -35,9 +36,11 @@ services:
       GIT_CONFIG_GLOBAL: /workspace/factory/config/gitconfig
     volumes:
       - openclaw-state:/home/node/.openclaw
+      - claude-home:/home/node/.claude
       - .:/workspace/factory
       - ${RUNNING_REPO:-/Users/zhaochaoyi/workspace/stride/running}:/workspace/running
       - ${CLAUDE_SKILLS_DIR:-/Users/zhaochaoyi/.claude/skills}:/home/node/.claude/skills:ro
 
 volumes:
   openclaw-state:
+  claude-home:

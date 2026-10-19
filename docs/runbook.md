@@ -68,3 +68,4 @@ scripts/up.sh    # 重启/升级后拉起（保留 openclaw-state 卷）
 - [ ] `~/.claude/skills` 只读挂载后 claude-cli 能发现 skills（my-workflow 等）
 - [ ] GH_TOKEN 在容器内 gh 可用；agents 的 git 署名（config/gitconfig）生效
 - [ ] wecom 插件 Bot 模式流式回复在手机端体验
+- **claude-cli backend 派生的 Claude Code 不继承容器 env**（报「Not logged in」）：凭证必须写进容器内 `~/.claude/settings.json`（与本机同构的原生方式），已挂 `claude-home` 持久卷 + `scripts/init-claude-auth.sh` 从 .env 同步（.env 改动后需重跑）。

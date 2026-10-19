@@ -13,6 +13,13 @@
 
 set -euo pipefail
 
+# bash-only（BASH_SOURCE / 间接展开）。请通过脚本自身 shebang 调用（./up.sh），
+# 或在 bash 里 source；zsh 里直接 `. env.sh` 会报 BASH_SOURCE/bad substitution。
+if [ -z "${BASH_VERSION:-}" ]; then
+  echo "env.sh: bash-only — 从 zsh 请执行 ./up.sh 这类入口脚本而不是 source 本文件" >&2
+  return 1 2>/dev/null || exit 1
+fi
+
 HARNESS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FACTORY_DIR="$(cd "$HARNESS_DIR/.." && pwd)"
 
