@@ -69,3 +69,4 @@ scripts/up.sh    # 重启/升级后拉起（保留 openclaw-state 卷）
 - [ ] GH_TOKEN 在容器内 gh 可用；agents 的 git 署名（config/gitconfig）生效
 - [ ] wecom 插件 Bot 模式流式回复在手机端体验
 - **claude-cli backend 派生的 Claude Code 不继承容器 env**（报「Not logged in」）：凭证必须写进容器内 `~/.claude/settings.json`（与本机同构的原生方式），已挂 `claude-home` 持久卷 + `scripts/init-claude-auth.sh` 从 .env 同步（.env 改动后需重跑）。
+- **运维纪律：Lily 回合中勿重启网关**（`docker compose exec openclaw-gateway openclaw agents list` 前先看有没有活回合）——重启会打断长回合触发 restart-recovery 重跑，恢复跑可能撑爆 CLI JSONL 20000 行上限（526s 后判死），把后续消息全堵在 lane 里。超长回合本身也是雷：已给 Lily 立「单回复 ≤300 字、长产出落票」规矩。
