@@ -1,0 +1,7 @@
+# 运行产物：结果 JSON 与生成的报告（run.sh 每次重新生成）
+results/
+# 测试附件（截图/trace）
+browser/test-results/
+miniprogram/test-results/
+# 小程序 DevTools 工作区拷贝（prepare.sh 生成）
+miniprogram/.workspace/

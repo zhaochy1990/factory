@@ -41,7 +41,7 @@ harness/run.sh --with-mp             # 加跑小程序（需要 DevTools 服务�
 |---|---|---|---|
 | B1 | browser | 管理员表单登录 → 总览主页 | URL 跳 `/`、总览标题、真实 `/api/auth/login` 200、截图 |
 | B2 | browser | 登录会话直查 MySQL | `auth_users` 种子管理员 + `auth_refresh_tokens` 本次登录新增未吊销行 |
-| M1 | miniprogram | 启动 → 首页渲染（本地栈） | 页面 ∈ {coach,login,onboarding}、根节点渲染、`[http]` 日志全打 127.0.0.1:8082 且零生产域名、模拟器截图 |
+| M1 | miniprogram | 启动 → 首页渲染（本地栈） | 页面 ∈ {coach,login,onboarding} 且根节点渲染；免密成功→token 本地公钥 RS256 验签（iss/aud/exp），落 login→UI 获取验证码后 Redis 直查 `sms:code:*:bind_phone`；模拟器截图 |
 
 ## 已知坑（速查，详见各子目录 README）
 
@@ -61,6 +61,11 @@ harness/run.sh --with-mp             # 加跑小程序（需要 DevTools 服务�
 7. **镜像 client id 烤死在 SPA bundle 里**：bootstrap 已把 admin-dashboard 的
    烤死 id 注册进 auth 库并回写 `local/.env`（harness 经
    `HARNESS_ADMIN_DASHBOARD_CLIENT_ID` 透传给登录用例）。
+8. **小程序新项目路径首次打开「不校验合法域名」不生效**（urlCheck=false 被
+   忽略，模拟器报 `url not in domain list`）——prepare.sh 每次改写
+   project.config.json 强制触发 DevTools 重读；还不行就手动勾一次
+   （详情 → 本地设置）。更多小程序坑（console 不回传、checkVersion 崩、
+   9420/9421 端口语义）见 `miniprogram/README.md`。
 
 ## 与 qa1 的对接
 

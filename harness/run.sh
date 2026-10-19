@@ -67,7 +67,7 @@ echo "== [4/5] 冒烟健康检查 =="
 smoke auth-backend    "curl -sf -m 5 $HARNESS_AUTH_BASE_URL/health"
 smoke stride-api      "curl -sf -m 5 $HARNESS_API_BASE_URL/health"
 smoke admin-dashboard "curl -sf -m 5 $HARNESS_DASHBOARD_BASE_URL/"
-smoke api-gateway     "curl -sf -m 5 $HARNESS_GATEWAY_BASE_URL/"
+smoke api-gateway     "curl -sf -m 5 $HARNESS_GATEWAY_BASE_URL/health"
 smoke mysql-tcp       "docker exec local-mysql-1 mysqladmin ping -h 127.0.0.1 --silent"
 regression_json+=']'
 
