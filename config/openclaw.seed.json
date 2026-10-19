@@ -54,14 +54,5 @@
     "alsoAllow": [
       "wecom-openclaw-plugin"
     ]
-  },
-  "channels": {
-    "wecom": {
-      "enabled": false,
-      "botId": "",
-      "secret": "",
-      "dmPolicy": "pairing",
-      "groupPolicy": "disabled"
-    }
   }
 }

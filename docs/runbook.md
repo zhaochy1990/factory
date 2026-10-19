@@ -70,3 +70,5 @@ scripts/up.sh    # 重启/升级后拉起（保留 openclaw-state 卷）
 - [ ] wecom 插件 Bot 模式流式回复在手机端体验
 - **claude-cli backend 派生的 Claude Code 不继承容器 env**（报「Not logged in」）：凭证必须写进容器内 `~/.claude/settings.json`（与本机同构的原生方式），已挂 `claude-home` 持久卷 + `scripts/init-claude-auth.sh` 从 .env 同步（.env 改动后需重跑）。
 - **运维纪律：Lily 回合中勿重启网关**（`docker compose exec openclaw-gateway openclaw agents list` 前先看有没有活回合）——重启会打断长回合触发 restart-recovery 重跑，恢复跑可能撑爆 CLI JSONL 20000 行上限（526s 后判死），把后续消息全堵在 lane 里。超长回合本身也是雷：已给 Lily 立「单回复 ≤300 字、长产出落票」规矩。
+- **报错可见性**：`scripts/error-watchdog.sh`（nohup 常驻）盯网关日志，lane task error / cli terminal failure / fallback / start blocked / 配对请求 命中即推 CEO 企业微信（5 分钟防抖）。网关重启后需确认它还活着（`ps aux | grep error-watchdog`）。
+- **种子配置不含 channels 段**（0630 事故：apply-config 用空凭证覆盖真实 botId/secret 导致通道消失、消息黑洞）——企业微信凭证唯一入口是 `scripts/configure-wecom.sh`。

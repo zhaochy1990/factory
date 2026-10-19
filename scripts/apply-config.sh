@@ -26,7 +26,6 @@ ops = [
     {"path": "bindings", "value": seed["bindings"]},
     {"path": "tools.agentToAgent", "value": seed["tools"]["agentToAgent"]},
     {"path": "tools.alsoAllow", "value": seed["tools"]["alsoAllow"]},
-    {"path": "channels.wecom", "value": seed["channels"]["wecom"]},
 ]
 json.dump(ops, open("/tmp/openclaw.batch.json", "w"))
 print("roster:", sorted(merged.keys()), file=__import__("sys").stderr)
