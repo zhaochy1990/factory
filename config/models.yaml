@@ -1,0 +1,23 @@
+# 模型分层配置（#632 拍板：role→model 默认 + 任务级可覆盖）
+#
+# 生效机制：容器 env 里的 ANTHROPIC_DEFAULT_*_MODEL 把 Claude Code 的
+# sonnet/haiku 档位名映射到 GLM 实际模型（由 scripts/gen-env.sh 从本机
+# ~/.claude/settings.json 同步进 .env，不在本仓存任何密钥）。
+#   lily  → 引用 sonnet 档 → glm-5.3（强档）
+#   dev/qa → 引用 haiku 档 → glm-5.3-flash（性价比档）
+
+roles:
+  lily: { tier: strong, claude_alias: sonnet, model: glm-5.3 }
+  dev: { tier: fast, claude_alias: haiku, model: glm-5.3-flash }
+  qa: { tier: fast, claude_alias: haiku, model: glm-5.3-flash }
+
+# 任务级覆盖（Lily 派活时可临时升档，须在此留痕）
+overrides: []
+  # - scope: "stride-devops#637"   # 例：设计收口类重活
+  #   role: qa
+  #   model: glm-5.3
+
+# 备选池（二阶段接入切换；DeepSeek 走 OpenCode/ACP 路径，见 ADR-0001）
+alternatives:
+  strong: [glm-5.3, deepseek-v4-pro]
+  fast: [glm-5.3-flash, deepseek-v4.1-flash]

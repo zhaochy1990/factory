@@ -1,0 +1,53 @@
+// OpenClaw 首次启动后的种子配置（scripts/apply-config.sh 应用）
+// 键名以官方文档为准；若 doctor/config 报未知键，跑 `openclaw config get` 对照修正。
+{
+  // Bot 模式 + 配对码准入 + 禁群聊（#632/#631 决议）
+  channels: {
+    wecom: {
+      enabled: false, // 拿到 botId/secret 后由 scripts/configure-wecom.sh 置 true
+      botId: "",
+      secret: "",
+      dmPolicy: "pairing",
+      groupPolicy: "disabled",
+    },
+  },
+
+  // 三 agent 花名册（#632 Q4：dev1/qa1 不绑通道，由 Lily 委派）
+  agents: {
+    list: [
+      {
+        id: "lily",
+        default: true,
+        name: "Lily",
+        workspace: "/workspace/factory/agents/lily", // AGENTS.md/SOUL.md 即岗位说明书
+        model: "anthropic/claude-sonnet-4-5",        // → env 映射 glm-5.3（强档）
+      },
+      {
+        id: "dev1",
+        name: "dev1",
+        workspace: "/workspace/running", // dev 在业务仓干活（worktree 隔离）
+        model: "anthropic/claude-haiku-4-5", // → glm-5.3-flash
+      },
+      {
+        id: "qa1",
+        name: "qa1",
+        workspace: "/workspace/running",
+        model: "anthropic/claude-haiku-4-5",
+      },
+    ],
+    defaults: {
+      // 全部 anthropic/* 模型经 claude-cli 引擎执行（ADR-0001）
+      models: { "anthropic/*": { agentRuntime: { id: "claude-cli" } } },
+    },
+  },
+
+  // CEO 企微单聊 → Lily（lily 为 default agent + dmPolicy=pairing，未知
+  // peer 走配对流程后落到 default；拿到 CEO 明文 userid 后可补精确绑定）
+  bindings: [],
+
+  // Lily 委派 dev1/qa1（agent-to-agent，#634 唯一枢纽原则）
+  tools: {
+    agentToAgent: { enabled: true, allow: ["lily", "dev1", "qa1"] },
+    alsoAllow: ["wecom-openclaw-plugin"],
+  },
+}
