@@ -1,0 +1,17 @@
+{
+  "name": "@factory/qa-browser-harness",
+  "version": "0.1.0",
+  "private": true,
+  "description": "QA e2e browser sample: real Playwright against the real local STRIDE stack (no mocks), assertions straight into MySQL.",
+  "scripts": {
+    "test": "playwright test",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.0",
+    "@types/node": "^24.0.0",
+    "dotenv": "^16.4.5",
+    "mysql2": "^3.11.0",
+    "typescript": "^5.6.3"
+  }
+}

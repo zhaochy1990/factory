@@ -7,9 +7,25 @@
 ```bash
 scripts/gen-env.sh        # 生成 .env（GLM 配置自动从 ~/.claude/settings.json 同步；gh token 自动取）
 scripts/up.sh             # 构建镜像 + 起网关 + 健康检查（http://127.0.0.1:18789/healthz）
+# 全新状态卷时网关会因 gateway.mode 未设而阻塞，停机直改配置文件再启动：
+docker compose stop openclaw-gateway
+docker compose run --rm --no-deps --entrypoint sh openclaw-gateway -c \
+  'python3 -c "import json;p=\"/home/node/.openclaw/openclaw.json\";c=json.load(open(p));c[\"gateway\"]={\"mode\":\"local\",\"bind\":\"0.0.0.0\"};json.dump(c,open(p,\"w\"),indent=2)"'
+docker compose start openclaw-gateway
 scripts/smoke-glm.sh      # ★ T4 第一验证项：容器内 claude-cli 连 GLM（输出 GLM_OK 即通过）
-scripts/apply-config.sh   # 应用种子配置（三 agent 花名册 / claude-cli 引擎 / 配对码 / 禁群聊）
+docker compose exec openclaw-gateway openclaw plugins install @wecom/wecom-openclaw-plugin
+scripts/apply-config.sh   # 应用种子配置（三 agent 花名册 / claude-cli 引擎 / wecom 路由→lily / 配对码 / 禁群聊）
 ```
+
+## 实测踩坑（2026-10-19 首次拉通，血泪版）
+
+- **Dockerfile 三坑**：基础镜像 npm ≥11.16 的 allowScripts 白名单会拦 claude-code postinstall（须 `--allow-scripts=@anthropic-ai/claude-code`）；`WORKDIR` 勿动（入口相对路径 `openclaw.mjs`，原始值 `/app`）；git/gh 用 `apt-get || apk` 双兜底。
+- **config 写入必须在网关容器内**（`docker compose exec`）：CLI 单独容器 PID 命名空间不同，共享状态所有权校验直接拒绝；compose 里 openclaw-cli 服务已加 `pid: service:openclaw-gateway`。
+- **状态库被「离线维护」卡死时**：停网关 → `docker compose run --rm --no-deps --entrypoint node openclaw-gateway dist/index.js doctor --fix` → 再启动。
+- **本版（2026.10.5）agents 是 `agents.entries` 按 id 的 map**（不是文档的 `agents.list` 数组）；entry 上的 `default` 是 legacy 标记会被校验拒写——用 **bindings 显式路由**（wecom→lily）替代默认 agent 机制；替换 entries 会触发「丢 main」守卫，`scripts/apply-config.sh` 做合并（main 保留）。
+- **`config set --batch-file` 吃纯 JSON 数组**（`[{path,value}]`），不吃 JSON5 注释、不吃整份配置对象。
+- **channels.wecom 在插件安装前是 unknown channel**，先装插件再应用种子。
+- claude-cli 对 `glm-5.3-flash` 报 unrecognized model（上下文窗口按 200k 兜底）——无害告警，POC 忽略。
 
 ## 企业微信接入（需要超管手工步骤）
 

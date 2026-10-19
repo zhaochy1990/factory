@@ -10,4 +10,5 @@ RUN npm install -g @anthropic-ai/claude-code --allow-scripts=@anthropic-ai/claud
  && claude --version
 
 USER node
-WORKDIR /workspace/factory
+# 保持基础镜像的 WORKDIR=/app（入口以相对路径 openclaw.mjs 启动，勿改）
+WORKDIR /app

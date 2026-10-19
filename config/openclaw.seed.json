@@ -1,0 +1,40 @@
+{
+  "agents": {
+    "entries": {
+      "lily": {
+        "name": "Lily",
+        "workspace": "/workspace/factory/agents/lily",
+        "model": "anthropic/claude-sonnet-4-5"
+      },
+      "dev1": {
+        "name": "dev1",
+        "workspace": "/workspace/running",
+        "model": "anthropic/claude-haiku-4-5"
+      },
+      "qa1": {
+        "name": "qa1",
+        "workspace": "/workspace/running",
+        "model": "anthropic/claude-haiku-4-5"
+      }
+    },
+    "defaults_models": {
+      "anthropic/*": { "agentRuntime": { "id": "claude-cli" } }
+    }
+  },
+  "bindings": [
+    { "agentId": "lily", "match": { "channel": "wecom" } }
+  ],
+  "tools": {
+    "agentToAgent": { "enabled": true, "allow": ["lily", "dev1", "qa1"] },
+    "alsoAllow": ["wecom-openclaw-plugin"]
+  },
+  "channels": {
+    "wecom": {
+      "enabled": false,
+      "botId": "",
+      "secret": "",
+      "dmPolicy": "pairing",
+      "groupPolicy": "disabled"
+    }
+  }
+}

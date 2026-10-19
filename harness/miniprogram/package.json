@@ -1,0 +1,16 @@
+{
+  "name": "@factory/qa-miniprogram-harness",
+  "version": "0.1.0",
+  "private": true,
+  "description": "QA e2e WeChat miniprogram sample: miniprogram-automator drives the real DevTools simulator against the real local STRIDE stack.",
+  "scripts": {
+    "prepare": "bash prepare.sh",
+    "test": "ts-node run.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "miniprogram-automator": "^0.12.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.6.3"
+  }
+}

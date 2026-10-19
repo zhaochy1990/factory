@@ -3,5 +3,5 @@
 # 通过标准：最后一行输出含 GLM_OK
 set -euo pipefail
 cd "$(dirname "$0")/.."
-docker compose run --rm --no-deps --entrypoint sh openclaw-cli -c \
+docker compose exec openclaw-gateway sh -c \
   'claude -p "只回复两个词：GLM_OK" --model haiku 2>&1 | tail -3'

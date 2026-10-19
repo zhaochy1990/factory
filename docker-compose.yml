@@ -28,6 +28,8 @@ services:
     image: factory-openclaw:poc
     profiles: ["cli"]
     entrypoint: ["openclaw"]
+    # 共享网关 PID 命名空间，否则共享状态所有权校验拒绝 config 写入
+    pid: "service:openclaw-gateway"
     env_file: .env
     environment:
       GIT_CONFIG_GLOBAL: /workspace/factory/config/gitconfig
