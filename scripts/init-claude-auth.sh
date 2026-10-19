@@ -15,6 +15,7 @@ for line in open(".env"):
     if k.startswith("ANTHROPIC_") or k == "GH_TOKEN":
         env[k] = v
 env["GIT_CONFIG_GLOBAL"] = "/workspace/factory/config/gitconfig"
+# 思考强度保持模型默认（CEO 10-19 拍板：不降思考强度，速度靠架构优化不靠砍质量）
 json.dump({"env": env}, open("/tmp/claude-settings.json", "w"), indent=2)
 PY
 
