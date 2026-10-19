@@ -46,5 +46,21 @@ else
   (cd "$WS" && "$TSC" --project tsconfig.json)
 fi
 
+# 已知坑（实测）：新项目路径首次被 DevTools 打开时，「不校验合法域名」
+# （setting.urlCheck=false）不生效——模拟器仍报 request:fail url not in
+# domain list。改写一次 project.config.json（内容有 diff）能触发 DevTools
+# 重读配置并生效。这里每次构建都带时间戳键强制产生 diff。
+python3 - "$WS/project.config.json" <<'PY'
+import json, sys, time
+p = sys.argv[1]
+d = json.load(open(p))
+d.setdefault('setting', {})['urlCheck'] = False
+d['_qaHarnessRefresh'] = str(int(time.time()))
+json.dump(d, open(p, 'w'), ensure_ascii=False, indent=2)
+PY
+
+# 给 DevTools 的文件监听一点时间消化配置变更（避免用例 attach 时撞上重编译窗口）
+sleep 3
+
 RUNNING_SHA="$(cd "$RUNNING_DIR" && git rev-parse --short HEAD)"
 echo "[mp/prepare] workspace ready: $WS (source running@${RUNNING_SHA}, ENV.DEV -> 127.0.0.1:8082)"

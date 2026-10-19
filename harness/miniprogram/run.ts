@@ -2,17 +2,21 @@
 //
 // 连本机微信开发者工具（自动化端口），打开 prepare.sh 生成的 .workspace
 // 项目（ENV.DEV → 本地栈 api-gateway :8082），跑「启动 → 首页渲染」一条
-// 真实用例：无 mock，后端 = 本地真实全栈；证据 = 模拟器截图 + console
-// `[http]` 日志（证明请求打的是 127.0.0.1:8082，且零生产域名）。
+// 真实用例：无 mock，后端 = 本地真实全栈。
+//
+// 证据链（console 在本 DevTools 构建不回传，见 README 已知坑）：
+//   * 免密登录成功 → 取存储 access_token，用本地栈 RS256 公钥验签（iss/aud/exp）
+//   * 落在 login 页 → UI「获取验证码」→ 真实 sms/send → 直查 Redis
 //
 // 输出 ../results/miniprogram-results.json 供 harness/report/generate.mjs 汇总。
+// 退出码：0 全绿 / 1 failed / 2 blocked（环境阻塞，非用例失败）。
 //
 // 前置条件（见 harness/miniprogram/README.md）：
-//   * 微信开发者工具已安装且「设置 → 安全设置 → 服务端口」已开启
-//   * DevTools 已登录（扫码）——自动化 CLI 需要登录态
+//   * 微信开发者工具已安装且「设置 → 安全设置 → 服务端口」已开启、已扫码登录
 //   * 本地栈已起（harness/stack/up.sh），.workspace 已构建（prepare.sh）
 import automator from 'miniprogram-automator';
 import { execFileSync } from 'node:child_process';
+import { createPublicKey, verify as cryptoVerify } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -27,46 +31,6 @@ const MiniProgramMod = require('miniprogram-automator/out/MiniProgram').default 
 };
 MiniProgramMod.prototype.checkVersion = async () => undefined;
 
-// miniprogram-automator 的类型是各模块独立 default export，这里用最小结构化
-// 接口（鸭子类型）引用，避免 import 包内部路径——只用我们确实调用的成员。
-interface MpElement {
-  text(): Promise<string>;
-}
-interface MpPage {
-  path: string;
-  $(selector: string): Promise<MpElement | null>;
-}
-interface MpProgram {
-  currentPage(): Promise<MpPage | undefined>;
-  on(event: string, listener: (...args: unknown[]) => void): unknown;
-  screenshot(options?: { path?: string }): Promise<string | void>;
-  disconnect(): void;
-  reLaunch(url: string): Promise<unknown>;
-}
-
-// 断言用的元素：input（可填）与可点击元素（tap）
-interface MpInput {
-  input(value: string): Promise<void>;
-}
-interface MpTappable {
-  tap(): Promise<void>;
-}
-
-// —— 直查 Redis（真实 SMS 验证码落库证明；栈里 redis 容器 local-redis-1）——
-const REDIS_PASSWORD = process.env.HARNESS_REDIS_PASSWORD || 'redis_password';
-function redisKeyExists(key: string): boolean {
-  try {
-    const out = execFileSync(
-      'docker',
-      ['exec', 'local-redis-1', 'redis-cli', '-a', REDIS_PASSWORD, '--no-auth-warning', 'EXISTS', key],
-      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
-    );
-    return out.trim() === '1';
-  } catch {
-    return false;
-  }
-}
-
 const WS = path.resolve(__dirname, '.workspace');
 const RESULTS = path.resolve(__dirname, '../results/miniprogram-results.json');
 const SHOT_DIR = path.resolve(__dirname, 'test-results');
@@ -79,8 +43,8 @@ const CLI_PATH =
 // 9421。connect 快路径默认试 9421；launch 冷启动路径让 automator 自己挑空闲端口。
 const PORT = Number(process.env.HARNESS_MP_AUTOMATOR_PORT || 9421);
 
-// 启动后允许落在的页面：微信免密登录成功 → 教练首页；未绑定 → 登录页；
-// 已绑定但档案未填 → onboarding。三者都算「正常渲染」，白屏/卡死才算挂。
+// 启动后允许落在的页面：微信免密登录成功 → 教练首页（或 onboarding）；未绑定 →
+// 登录页。三者都算「正常渲染」，白屏/卡死才算挂。
 const OK_PATHS = new Set([
   'pages/coach/coach',
   'pages/login/login',
@@ -98,88 +62,110 @@ interface CaseResult {
   durationMs: number;
 }
 
+// miniprogram-automator 的类型是各模块独立 default export，这里用最小结构化
+// 接口（鸭子类型）引用，避免 import 包内部路径——只用我们确实调用的成员。
+interface MpElement {
+  text(): Promise<string>;
+}
+interface MpInput {
+  input(value: string): Promise<void>;
+}
+interface MpTappable {
+  tap(): Promise<void>;
+}
+interface MpPage {
+  path: string;
+  $(selector: string): Promise<MpElement | null>;
+}
+interface MpProgram {
+  currentPage(): Promise<MpPage | undefined>;
+  on(event: string, listener: (...args: unknown[]) => void): unknown;
+  screenshot(options?: { path?: string }): Promise<string | void>;
+  disconnect(): void;
+  reLaunch(url: string): Promise<unknown>;
+  callWxMethod(method: string, ...args: unknown[]): Promise<unknown>;
+}
+
+// —— 直查 Redis（真实 SMS 验证码落库证明；栈里 redis 容器 local-redis-1）——
+const REDIS_PASSWORD = process.env.HARNESS_REDIS_PASSWORD || 'redis_password';
+function redisKeyExists(key: string): boolean {
+  try {
+    const out = execFileSync(
+      'docker',
+      ['exec', 'local-redis-1', 'redis-cli', '-a', REDIS_PASSWORD, '--no-auth-warning', 'EXISTS', key],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
+    );
+    return out.trim() === '1';
+  } catch {
+    return false;
+  }
+}
+
+// —— 免密登录成功的硬证据：取小程序存储里的 access_token，用本地栈的 RS256
+// 公钥（stride-devops/local/keys/public.pem，签发者=本地 auth-backend）验签 +
+// 校验 iss/aud/exp。伪造/生产 token 都过不了这一关。
+const MP_CLIENT_ID = process.env.HARNESS_WECHAT_MINIPROGRAM_CLIENT_ID || '';
+function verifyLocalJwt(token: string): { ok: boolean; detail: string } {
+  try {
+    const pubPath = path.join(process.env.STRIDE_DEVOPS_DIR || '', 'local', 'keys', 'public.pem');
+    const pub = createPublicKey(fs.readFileSync(pubPath));
+    const [h, p, s] = token.split('.');
+    const okSig = cryptoVerify('RSA-SHA256', Buffer.from(`${h}.${p}`), pub, Buffer.from(s, 'base64url'));
+    if (!okSig) return { ok: false, detail: 'RS256 验签失败（非本地 auth-backend 签发）' };
+    const claims = JSON.parse(Buffer.from(p, 'base64url').toString('utf8')) as Record<string, unknown>;
+    if (claims.iss !== 'auth-service') return { ok: false, detail: `iss=${claims.iss}` };
+    if (MP_CLIENT_ID && claims.aud !== MP_CLIENT_ID) return { ok: false, detail: `aud=${claims.aud}` };
+    if (Number(claims.exp) * 1000 < Date.now()) return { ok: false, detail: 'token 已过期' };
+    return { ok: true, detail: `iss=${claims.iss} aud=${claims.aud} sub=${String(claims.sub).slice(0, 8)}… 验签通过` };
+  } catch (e) {
+    return { ok: false, detail: `验签异常: ${(e as Error).message}` };
+  }
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 const startedAt = new Date().toISOString();
 
-async function main(): Promise<void> {
-  fs.mkdirSync(SHOT_DIR, { recursive: true });
-  fs.mkdirSync(path.dirname(RESULTS), { recursive: true });
+// automator 的 Transport 对每条命令有内建超时，DevTools 正在重编译（如
+// prepare.sh 改写 project.config.json 触发热重载）时会短暂不应答，拒绝可能以
+// unhandledRejection 冒出来直接杀进程。兜住：记录、让用例层重试，不崩。
+let transportGlitch: string | null = null;
+process.on('unhandledRejection', (reason) => {
+  transportGlitch = String(reason);
+  console.error('[mp] unhandledRejection（已兜住）:', String(reason).slice(0, 200));
+});
 
-  const cases: CaseResult[] = [];
-  const consoleLines: string[] = [];
+// —— attach：connect 快路径优先，launch 冷启动兜底 ---------------------------
+async function attachMp(): Promise<{ mp: MpProgram; how: string }> {
+  try {
+    const mp = ((await automator.connect({
+      wsEndpoint: `ws://127.0.0.1:${PORT}`,
+    })) as unknown) as MpProgram;
+    return { mp, how: `connect ws://127.0.0.1:${PORT}` };
+  } catch {
+    /* fallthrough to launch */
+  }
+  const mp = ((await automator.launch({
+    cliPath: CLI_PATH,
+    projectPath: WS,
+    timeout: 90_000,
+  })) as unknown) as MpProgram;
+  return { mp, how: 'launch(cli auto)' };
+}
 
-  let mp: MpProgram | null = null;
+// —— M1 用例体 ----------------------------------------------------------------
+async function runM1(mp: MpProgram, attachHow: string, consoleLines: string[]): Promise<CaseResult> {
   const t0 = Date.now();
-  let blocked: string | null = null;
-  let attachHow = '';
-
-  try {
-    if (!fs.existsSync(path.join(WS, 'project.config.json'))) {
-      throw new Error(`workspace 未构建：${WS} 缺 project.config.json — 先跑 harness/miniprogram/prepare.sh`);
-    }
-    // 两段式接入：
-    //  a) connect——IDE 的自动化服务端口已开（之前跑过 cli auto / 上次 run 留下的
-    //     实例），直接连最快，且不会把用户开着的 IDE 关掉。注意此时连的是「当前
-    //     打开的项目」，M1 的页面集合 + [http]→127.0.0.1:8082 断言保证它就是我们的
-    //     workspace（别的项目过不了这两条）。
-    //  b) launch——冷启动：经 DevTools CLI 打开 workspace 项目并接管自动化端口；
-    //     不指定死端口，让 automator 挑空闲端口（9420 被占时会自动换）。
-    try {
-      mp = ((await automator.connect({
-        wsEndpoint: `ws://127.0.0.1:${PORT}`,
-      })) as unknown) as MpProgram;
-      attachHow = `connect ws://127.0.0.1:${PORT}`;
-    } catch {
-      mp = ((await automator.launch({
-        cliPath: CLI_PATH,
-        projectPath: WS,
-        timeout: 90_000,
-      })) as unknown) as MpProgram;
-      attachHow = 'launch(cli auto)';
-    }
-  } catch (err) {
-    blocked = `automator 接入失败（connect+launch 都没成）：${(err as Error).message}`;
-  }
-
-  if (!mp) {
-    cases.push({
-      name: 'M1 启动 → 首页渲染（本地栈）',
-      status: 'blocked',
-      steps: 'automator.launch(cli, .workspace, port ' + PORT + ') → 等 entry page 渲染 → 断言页面/网络',
-      expected: 'DevTools 模拟器打开小程序，首页（coach/login/onboarding 之一）渲染，HTTP 全部打 127.0.0.1:8082',
-      actual: '未执行（自动化未连通）',
-      evidence: '—',
-      error: blocked ?? 'unknown',
-      durationMs: Date.now() - t0,
-    });
-    writeResults({ suite: 'qa-harness/miniprogram', startedAt, finishedAt: new Date().toISOString(), cases });
-    console.error(`[mp] BLOCKED: ${blocked}`);
-    console.error('[mp] 手动开启步骤：微信开发者工具 → 设置 → 安全设置 → 开启「服务端口」；并确保 DevTools 已扫码登录。');
-    process.exitCode = 2; // blocked ≠ failed：报告里单独呈现
-    return;
-  }
-
-  try {
-    mp.on('console', (msg) => {
-      // automator console 消息形如 { type, args: [...] }（非官方类型化）
-      const m = msg as { type?: string; args?: unknown[] };
-      const args = Array.isArray(m.args) ? m.args : [];
-      const line = args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
-      consoleLines.push(line);
-    });
-  } catch (e) {
-    consoleLines.push(`(console 订阅失败: ${(e as Error).message})`);
-  }
-
-  // ---- M1: 启动 → 首页渲染 -------------------------------------------------
-  const m1start = Date.now();
   let page: MpPage | undefined;
+  const steps = `automator ${attachHow} → 等首页渲染 → 断言页面路径+根节点渲染 → 网络证据（免密成功：token 本地公钥 RS256 验签 / 落 login：UI 获取验证码→Redis 直查）→ 截图`;
+  const expected = '页面 ∈ {coach,login,onboarding} 且根节点渲染；token 由本地 auth-backend 签发（或 sms/send 落 Redis）；零生产域名';
   try {
-    // 轮询页面栈直到 entry page 出现（DevTools 编译 + 冷启动要几秒）
+    // 轮询页面栈直到 entry page 出现（DevTools 编译 + 冷启动/重编译要几秒）
     const deadline = Date.now() + 45_000;
     while (Date.now() < deadline) {
       page = await Promise.resolve(mp.currentPage()).catch(() => undefined);
       if (page && OK_PATHS.has(page.path)) break;
-      await new Promise((r) => setTimeout(r, 1_000));
+      await sleep(1_000);
     }
     if (!page || !OK_PATHS.has(page.path)) {
       throw new Error(
@@ -203,14 +189,23 @@ async function main(): Promise<void> {
       rendered = 'onboarding 根节点已渲染';
     }
 
-    // 网络证据（真实用户流，非 mock）：login 页默认「手机号登录」tab，
-    // 「获取验证码」→ 真实 POST /api/auth/sms/send（AUTH_BASE_URL=127.0.0.1:8082
-    // → 本地栈 auth-backend；SMS 测试模式验证码固定 123456）。
-    // 副作用直查 Redis：sms:code:<phone>:bind_phone 必须出现。
-    // （本 DevTools 构建 console 事件不回传——App.logAdded 不可用，是已知坑，
-    // 所以证据链用「UI 操作 → 数据库断言」而非 console 日志。）
-    let trafficActual = `（本次落在 ${page.path}，无免登录写路径可触发，仅断言渲染）`;
-    if (page.path === 'pages/login/login') {
+    // 网络证据（真实用户流，非 mock），两条路按落点自动选：
+    //  a) coach/onboarding（免密登录成功）→ 取存储里的 access_token，用本地栈
+    //     RS256 公钥验签 + iss/aud/exp 校验 —— 证明 token 确实是本地真实
+    //     auth-backend 通过 wx.login token_exchange 签发的。
+    //  b) login 页（未绑定/首次）→ 「获取验证码」→ 真实 POST /api/auth/sms/send
+    //     （127.0.0.1:8082 → 本地栈；SMS 测试模式验证码固定 123456），
+    //     副作用直查 Redis：sms:code:<phone>:bind_phone 必须出现。
+    let trafficActual = `（本次落在 ${page.path}，未触发网络断言，仅断言渲染）`;
+    if (page.path !== 'pages/login/login') {
+      const token = String(
+        await Promise.resolve(mp.callWxMethod('getStorageSync', 'access_token')).catch(() => ''),
+      );
+      if (!token) throw new Error('已进首页但存储里没有 access_token — 免密登录状态可疑');
+      const v = verifyLocalJwt(token);
+      if (!v.ok) throw new Error(`access_token 验签失败：${v.detail}`);
+      trafficActual = `免密登录 token 经本地栈 RS256 公钥验签 ✓（${v.detail}）`;
+    } else {
       const phone = '139' + String(Date.now()).slice(-8); // 唯一号码，避开 cooldown/日限
       const phoneInput = await page.$('.login-input-phone');
       if (!phoneInput) throw new Error('login 页未找到手机号输入框 .login-input-phone');
@@ -218,7 +213,7 @@ async function main(): Promise<void> {
       const codeBtn = await page.$('.login-code-btn');
       if (!codeBtn) throw new Error('login 页未找到「获取验证码」按钮 .login-code-btn');
       await (codeBtn as unknown as MpTappable).tap();
-      await new Promise((r) => setTimeout(r, 4_000)); // 等 UI → 本地栈往返
+      await sleep(4_000); // 等 UI → 本地栈往返
       const codeKey = `sms:code:${phone}:bind_phone`;
       const cooldownKey = `sms:cooldown:${phone}`;
       if (!redisKeyExists(codeKey)) {
@@ -237,39 +232,110 @@ async function main(): Promise<void> {
       consoleLines.push(`(截图失败: ${e.message})`);
     });
 
-    cases.push({
+    return {
       name: 'M1 启动 → 首页渲染（本地栈）',
       status: 'passed',
-      steps: `automator ${attachHow} → 等首页渲染 → 断言页面路径+根节点 → login 页点「获取验证码」走真实 sms/send → 直查 Redis → 截图`,
-      expected: '页面 ∈ {coach,login,onboarding} 且根节点渲染；UI 触发的 /api/auth/sms/send 在本地栈 Redis 落 sms:code:<phone>:bind_phone；零生产域名',
+      steps,
+      expected,
       actual: `attach=${attachHow}；page=${page.path}；rendered="${rendered}"；${trafficActual}`,
       evidence: `${path.relative(path.resolve(__dirname, '../..'), shot)}`,
-      durationMs: Date.now() - m1start,
-    });
+      durationMs: Date.now() - t0,
+    };
   } catch (err) {
     const shot = path.join(SHOT_DIR, 'm1-failure.png');
     await Promise.resolve(mp.screenshot({ path: shot })).catch(() => undefined);
-    cases.push({
+    return {
       name: 'M1 启动 → 首页渲染（本地栈）',
       status: 'failed',
-      steps: `automator ${attachHow} → 等首页渲染 → 断言页面路径+根节点 → login 页点「获取验证码」走真实 sms/send → 直查 Redis → 截图`,
-      expected: '页面 ∈ {coach,login,onboarding} 且根节点渲染；UI 触发的 /api/auth/sms/send 在本地栈 Redis 落 sms:code:<phone>:bind_phone；零生产域名',
+      steps,
+      expected,
       actual: page ? `停在 ${page.path}` : '未取到页面',
       evidence: `${path.relative(path.resolve(__dirname, '../..'), shot)}；console 尾部: ${consoleLines.slice(-5).join(' ⏎ ').slice(0, 400)}`,
       error: (err as Error).message,
-      durationMs: Date.now() - m1start,
+      durationMs: Date.now() - t0,
+    };
+  }
+}
+
+// —— main ----------------------------------------------------------------------
+async function main(): Promise<void> {
+  fs.mkdirSync(SHOT_DIR, { recursive: true });
+  fs.mkdirSync(path.dirname(RESULTS), { recursive: true });
+
+  const consoleLines: string[] = [];
+  const finishedCases: CaseResult[] = [];
+
+  if (!fs.existsSync(path.join(WS, 'project.config.json'))) {
+    finishedCases.push({
+      name: 'M1 启动 → 首页渲染（本地栈）',
+      status: 'blocked',
+      steps: 'attach → 等首页渲染 → 断言',
+      expected: 'workspace 已构建',
+      actual: '未执行',
+      evidence: '—',
+      error: `workspace 未构建：${WS} 缺 project.config.json — 先跑 harness/miniprogram/prepare.sh`,
+      durationMs: 0,
     });
-    process.exitCode = 1;
-  } finally {
-    // 断开连接但保留 DevTools 运行（下次连更快）；不要 close() 整个 IDE。
+    writeResults({ suite: 'qa-harness/miniprogram', startedAt, finishedAt: new Date().toISOString(), cases: finishedCases });
+    process.exitCode = 2;
+    return;
+  }
+
+  // 最多两轮：DevTools 可能在 prepare.sh 触发的重编译窗口里短暂不应答
+  // （timeout waiting for automator response），第二轮自然恢复。
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    let mp: MpProgram | null = null;
+    let attachHow = '';
     try {
-      mp.disconnect();
-    } catch {
-      /* best-effort */
+      const attached = await attachMp();
+      mp = attached.mp;
+      attachHow = attached.how;
+      try {
+        mp.on('console', (msg) => {
+          // automator console 消息形如 { type, args: [...] }（非官方类型化）
+          const m = msg as { type?: string; args?: unknown[] };
+          const args = Array.isArray(m.args) ? m.args : [];
+          consoleLines.push(args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' '));
+        });
+      } catch {
+        /* console 通道不可用是已知坑，不影响证据链 */
+      }
+      const result = await runM1(mp, attachHow, consoleLines);
+      // 传输层毛刺导致的失败且还有重试额度 → 等编译窗口过去再来一轮
+      const glitchy = transportGlitch !== null || /timeout waiting for automator/.test(result.error ?? '');
+      if (result.status === 'failed' && glitchy && attempt === 1) {
+        console.error(`[mp] attempt ${attempt} 疑似撞上 DevTools 重编译窗口，12s 后重试`);
+        try { mp.disconnect(); } catch { /* ignore */ }
+        await sleep(12_000);
+        transportGlitch = null;
+        continue;
+      }
+      finishedCases.push(result);
+      if (result.status !== 'passed') process.exitCode = 1;
+      try { mp.disconnect(); } catch { /* ignore */ }
+      break;
+    } catch (err) {
+      if (attempt === 1) {
+        console.error(`[mp] attach 失败（${(err as Error).message}），10s 后重试一轮`);
+        await sleep(10_000);
+        continue;
+      }
+      finishedCases.push({
+        name: 'M1 启动 → 首页渲染（本地栈）',
+        status: 'blocked',
+        steps: `attach（connect ws://127.0.0.1:${PORT} + launch 兜底）→ 等首页渲染 → 断言`,
+        expected: 'DevTools 自动化端口可用且项目可打开',
+        actual: '未执行（自动化未连通）',
+        evidence: '—',
+        error: `automator 接入失败：${(err as Error).message}`,
+        durationMs: 0,
+      });
+      console.error('[mp] 手动开启步骤：微信开发者工具 → 设置 → 安全设置 → 开启「服务端口」；并确保 DevTools 已扫码登录。');
+      process.exitCode = 2;
     }
   }
 
-  writeResults({ suite: 'qa-harness/miniprogram', startedAt, finishedAt: new Date().toISOString(), cases });
+  writeResults({ suite: 'qa-harness/miniprogram', startedAt, finishedAt: new Date().toISOString(), cases: finishedCases });
 }
 
 function writeResults(payload: unknown): void {

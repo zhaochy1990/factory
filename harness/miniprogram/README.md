@@ -28,28 +28,58 @@ cd harness/miniprogram && npm install && npm test     # 3) 跑用例（launch De
 结果写 `harness/results/miniprogram-results.json`（blocked/failed 也会写，
 供报告生成器呈现）；截图在 `harness/miniprogram/test-results/`。
 
+## 用例 M1 的证据链（无 mock 怎么证明）
+
+按启动落点自动二选一，都直连真实数据面：
+
+- **免密登录成功**（coach/onboarding 页）：从模拟器存储取 `access_token`，
+  用本地栈 `stride-devops/local/keys/public.pem` 做 **RS256 验签** + iss/
+  aud/exp 校验——token 只可能由本地真实 auth-backend 通过 wx.login
+  token_exchange 签发，伪造/生产 token 过不了。
+- **落在 login 页**（未绑定）：UI 填手机号点「获取验证码」→ 真实
+  `POST /api/auth/sms/send`（127.0.0.1:8082）→ **直查 Redis** 断言
+  `sms:code:<phone>:bind_phone` 存在。
+
 ## 前置条件（缺一会被判定 blocked，不会卡死硬试）
 
 1. **微信开发者工具**已装在 `/Applications/wechatwebdevtools.app`（本机已装）。
 2. **服务端口已开启**：DevTools → 设置 → 安全设置 → 服务端口 开启
-   （自动化 CLI 走它；端口即 `HARNESS_MP_AUTOMATOR_PORT`，默认 9420）。
-   探测：`lsof -nP -iTCP:9420 -sTCP:LISTEN` 有监听即已开。
+   （IDE HTTP server 在 9420；自动化协议端口由 `cli auto --auto-port` 指定，
+   本 harness 默认 9421，`HARNESS_MP_AUTOMATOR_PORT` 可覆盖）。
 3. **DevTools 已扫码登录**（自动化命令需要登录态；未登录时 cli 会弹码等待）。
 4. 项目 appid `wx001942f3d26787c2` 与本地栈 auth 已用
    `harness/stack/seed.sh --miniprogram-login` 注册（`enable-miniprogram-login.sh`
    需要 stride-devops/local/.env 里有 `WECHAT_MINIPROGRAM_APPID/_APP_SECRET`）。
-   未注册时 wx.login 免密换 token 会失败 → 用例会落在 login 页（仍算渲染
-   通过，但登录链路不算绿）。
+   未注册时 wx.login 免密换 token 会失败 → 用例会落在 login 页（SMS 分支
+   仍可给出真实网络证据）。
 
-## 已知坑
+## 已知坑（全部实测踩过）
 
-- **logger 不可依赖**：小程序 `utils/logger.ts` 走 `wx.getRealtimeLogManager`
-  （微信实时日志），**只在正式/体验版生效，开发者工具里完全看不到**，API
-  不可用时还静默降级——断言要看 `console.log`（`[http] →/←` 前缀）或页面
-  data，不要等 logger。
-- `automator.launch` 会复用已运行的 DevTools 实例并占用服务端口；结束用
-  `disconnect()`（保留 IDE），别 `close()` 把用户开着的工具整个关掉。
-- 模拟器里 `wx.login` 的 code 是真实的（依赖 DevTools 登录身份）；auth-backend
-  做 code2session 需要能出网访问微信 API + 小程序 app 的 secret 配置正确。
-- 首页判定集合 `{coach, login, onboarding}`：未绑定微信账号落在 login，
-  免密成功但档案未填落在 onboarding——这三种都是真实启动路径，不是失败。
+1. **新项目路径首次打开时「不校验合法域名」不生效**——即使
+   `project.config.json` 里 `setting.urlCheck=false`，DevTools 对新路径的
+   项目照样报 `request:fail url not in domain list`。**解法（已内建在
+   prepare.sh）**：改写一次 `project.config.json`（内容有 diff，如时间戳键
+   `_qaHarnessRefresh`）触发 DevTools 重读配置，开关即生效。若仍失败，在
+   DevTools 项目窗口手动勾一次：详情 → 本地设置 → 不校验合法域名。
+2. **console 事件不回传**——本机 DevTools 2.02.2608040 连上 automator 后
+   `App.logAdded` 一条也不来（`[http] →/←` 日志收不到）。断言改走
+   「UI/存储 → 数据断言」：免密登录 token 用本地栈公钥 RS256 验签；SMS 流程
+   直查 Redis `sms:code:<phone>:bind_phone`。
+3. **checkVersion 崩溃**——该 DevTools 的 `Tool.getInfo` 只返回 `{version}`
+   （无 `SDKVersion`），automator 0.12.1 的 checkVersion 对 undefined 做
+   `.split` 直接挂。run.ts 里把 `MiniProgram.prototype.checkVersion` patch 成
+   no-op（协议本身实测正常）。
+4. **端口语义**——9420 是 DevTools 固定的 IDE HTTP server 端口（websocket 连
+   它吃 404）；自动化协议端口是 `cli auto --auto-port N` 指定的（本 harness 用
+   9421）。connect 快路径连 9421；launch 冷启动让 automator 自己挑空闲端口。
+5. **`automator.launch` 显式传 port: 9420 会报 "Port 9420 is in use"**——因为
+   9420 永远被 IDE server 占着；不传 port 让它自选即可。
+6. **logger 不可依赖**：小程序 `utils/logger.ts` 走 `wx.getRealtimeLogManager`
+   （微信实时日志），只在正式/体验版生效、开发者工具里完全看不到、API 不可用
+   时静默降级——断言别等 logger 输出。
+7. 模拟器里 `wx.login` 的 code 是真实的（依赖 DevTools 扫码登录身份）；
+   auth-backend 做 code2session 需要出网 + `local/.env` 的
+   `WECHAT_MINIPROGRAM_APPID/_APP_SECRET`（`seed.sh --miniprogram-login` 注册）。
+8. 首页判定集合 `{coach, login, onboarding}`：未绑定微信账号落在 login，
+   免密成功但档案未填落在 onboarding——三种都是真实启动路径，不是失败。
+   结束时用 `disconnect()`（保留 IDE），别 `close()` 关掉整个工具。
