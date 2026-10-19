@@ -9,6 +9,8 @@ services:
     image: factory-openclaw:poc
     container_name: factory-openclaw
     restart: unless-stopped
+    # 防忙循环吃满宿主：限 6 核（#635 卡顿实测）
+    cpus: 6
     # 仅宿主机 loopback 可达（ADR-0001 安全基线：Gateway 永不暴露公网）
     ports:
       - "127.0.0.1:18789:18789"
