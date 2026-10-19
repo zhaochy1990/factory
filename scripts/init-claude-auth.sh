@@ -12,8 +12,9 @@ for line in open(".env"):
     if not line or line.startswith("#") or "=" not in line:
         continue
     k, v = line.split("=", 1)
-    if k.startswith("ANTHROPIC_"):
+    if k.startswith("ANTHROPIC_") or k == "GH_TOKEN":
         env[k] = v
+env["GIT_CONFIG_GLOBAL"] = "/workspace/factory/config/gitconfig"
 json.dump({"env": env}, open("/tmp/claude-settings.json", "w"), indent=2)
 PY
 

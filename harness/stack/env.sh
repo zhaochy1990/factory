@@ -58,6 +58,8 @@ export HARNESS_MYSQL_PORT="$(stack_env MYSQL_HOST_PORT 3306)"
 export HARNESS_MYSQL_USER="$(stack_env MYSQL_USER auth)"
 export HARNESS_MYSQL_PASSWORD="$(stack_env MYSQL_PASSWORD auth_password)"
 export HARNESS_MYSQL_DATABASE="${HARNESS_MYSQL_DATABASE:-auth}"
+# Redis（auth-backend 的 SMS 验证码库；测试断言 sms:code:<phone>:<scene> 等 key）
+export HARNESS_REDIS_PASSWORD="$(stack_env REDIS_PASSWORD redis_password)"
 export HARNESS_AUTH_BASE_URL="${HARNESS_AUTH_BASE_URL:-http://localhost:3001}"
 export HARNESS_API_BASE_URL="${HARNESS_API_BASE_URL:-http://localhost:3000}"
 export HARNESS_DASHBOARD_BASE_URL="${HARNESS_DASHBOARD_BASE_URL:-http://localhost:8081}"

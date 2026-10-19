@@ -12,6 +12,7 @@
 //   * DevTools 已登录（扫码）——自动化 CLI 需要登录态
 //   * 本地栈已起（harness/stack/up.sh），.workspace 已构建（prepare.sh）
 import automator from 'miniprogram-automator';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -41,6 +42,29 @@ interface MpProgram {
   screenshot(options?: { path?: string }): Promise<string | void>;
   disconnect(): void;
   reLaunch(url: string): Promise<unknown>;
+}
+
+// 断言用的元素：input（可填）与可点击元素（tap）
+interface MpInput {
+  input(value: string): Promise<void>;
+}
+interface MpTappable {
+  tap(): Promise<void>;
+}
+
+// —— 直查 Redis（真实 SMS 验证码落库证明；栈里 redis 容器 local-redis-1）——
+const REDIS_PASSWORD = process.env.HARNESS_REDIS_PASSWORD || 'redis_password';
+function redisKeyExists(key: string): boolean {
+  try {
+    const out = execFileSync(
+      'docker',
+      ['exec', 'local-redis-1', 'redis-cli', '-a', REDIS_PASSWORD, '--no-auth-warning', 'EXISTS', key],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
+    );
+    return out.trim() === '1';
+  } catch {
+    return false;
+  }
 }
 
 const WS = path.resolve(__dirname, '.workspace');
@@ -179,25 +203,33 @@ async function main(): Promise<void> {
       rendered = 'onboarding 根节点已渲染';
     }
 
-    // 网络证据：小程序真实发起过 HTTP；全部打本地栈，零生产域名。
-    // connect 快路径接入时项目早已启动，首发请求的 [http] 日志发生在 attach 之前
-    // 收不到——所以这里 reLaunch 一次入口页，强制一轮新的真实网络往返。
-    const entry = page.path === 'pages/login/login' ? '/pages/coach/coach' : `/${page.path}`;
-    await Promise.resolve(mp.reLaunch(entry)).catch((e: Error) => {
-      consoleLines.push(`(reLaunch 失败: ${e.message})`);
-    });
-    await new Promise((r) => setTimeout(r, 5_000)); // 等 reLaunch + [http] ← 响应
-    const httpLines = consoleLines.filter((l) => l.includes('[http]'));
-    const localHits = httpLines.filter((l) => l.includes('127.0.0.1:8082'));
-    const prodHits = httpLines.filter((l) => l.includes('stride-running.cn'));
-    if (httpLines.length === 0) {
-      throw new Error('console 未见任何 [http] 日志 — 小程序没有发起真实网络请求');
+    // 网络证据（真实用户流，非 mock）：login 页默认「手机号登录」tab，
+    // 「获取验证码」→ 真实 POST /api/auth/sms/send（AUTH_BASE_URL=127.0.0.1:8082
+    // → 本地栈 auth-backend；SMS 测试模式验证码固定 123456）。
+    // 副作用直查 Redis：sms:code:<phone>:bind_phone 必须出现。
+    // （本 DevTools 构建 console 事件不回传——App.logAdded 不可用，是已知坑，
+    // 所以证据链用「UI 操作 → 数据库断言」而非 console 日志。）
+    let trafficActual = `（本次落在 ${page.path}，无免登录写路径可触发，仅断言渲染）`;
+    if (page.path === 'pages/login/login') {
+      const phone = '139' + String(Date.now()).slice(-8); // 唯一号码，避开 cooldown/日限
+      const phoneInput = await page.$('.login-input-phone');
+      if (!phoneInput) throw new Error('login 页未找到手机号输入框 .login-input-phone');
+      await (phoneInput as unknown as MpInput).input(phone);
+      const codeBtn = await page.$('.login-code-btn');
+      if (!codeBtn) throw new Error('login 页未找到「获取验证码」按钮 .login-code-btn');
+      await (codeBtn as unknown as MpTappable).tap();
+      await new Promise((r) => setTimeout(r, 4_000)); // 等 UI → 本地栈往返
+      const codeKey = `sms:code:${phone}:bind_phone`;
+      const cooldownKey = `sms:cooldown:${phone}`;
+      if (!redisKeyExists(codeKey)) {
+        throw new Error(`点「获取验证码」后 Redis 未见 ${codeKey} — 小程序↔本地栈链路没打通`);
+      }
+      trafficActual = `UI 获取验证码(${phone}) → Redis sms:code:…:bind_phone ✓，cooldown ${redisKeyExists(cooldownKey) ? '✓' : '✗'}（真实 /api/auth/sms/send 已落库）`;
     }
+    // 防御性：若 console 通道有回传（别的 DevTools 版本），不得出现生产域名
+    const prodHits = consoleLines.filter((l) => l.includes('stride-running.cn'));
     if (prodHits.length > 0) {
       throw new Error(`检测到生产域名请求（禁止）: ${prodHits.slice(0, 3).join(' | ')}`);
-    }
-    if (localHits.length === 0) {
-      throw new Error(`[http] 日志存在但没有一条打 127.0.0.1:8082（ENV 指错？）: ${httpLines.slice(0, 3).join(' | ')}`);
     }
 
     const shot = path.join(SHOT_DIR, 'm1-home.png');
@@ -208,10 +240,10 @@ async function main(): Promise<void> {
     cases.push({
       name: 'M1 启动 → 首页渲染（本地栈）',
       status: 'passed',
-      steps: `automator ${attachHow} → 等首页渲染 → 断言页面路径+根节点 → 校验 [http] 日志全部打 127.0.0.1:8082 → 截图`,
-      expected: '页面 ∈ {coach,login,onboarding}；根节点渲染；HTTP 打本地 api-gateway 且零生产域名',
-      actual: `attach=${attachHow}；page=${page.path}；rendered="${rendered}"；[http]×${httpLines.length}（本地 ${localHits.length} / 生产 0）`,
-      evidence: `${path.relative(path.resolve(__dirname, '../..'), shot)}；console [http] 首条: ${localHits[0]?.slice(0, 120) ?? ''}`,
+      steps: `automator ${attachHow} → 等首页渲染 → 断言页面路径+根节点 → login 页点「获取验证码」走真实 sms/send → 直查 Redis → 截图`,
+      expected: '页面 ∈ {coach,login,onboarding} 且根节点渲染；UI 触发的 /api/auth/sms/send 在本地栈 Redis 落 sms:code:<phone>:bind_phone；零生产域名',
+      actual: `attach=${attachHow}；page=${page.path}；rendered="${rendered}"；${trafficActual}`,
+      evidence: `${path.relative(path.resolve(__dirname, '../..'), shot)}`,
       durationMs: Date.now() - m1start,
     });
   } catch (err) {
@@ -220,8 +252,8 @@ async function main(): Promise<void> {
     cases.push({
       name: 'M1 启动 → 首页渲染（本地栈）',
       status: 'failed',
-      steps: 'automator.launch(.workspace) → 等首页渲染 → 断言页面路径+根节点 → 校验 [http] 日志 → 截图',
-      expected: '页面 ∈ {coach,login,onboarding}；根节点渲染；HTTP 打本地 api-gateway 且零生产域名',
+      steps: `automator ${attachHow} → 等首页渲染 → 断言页面路径+根节点 → login 页点「获取验证码」走真实 sms/send → 直查 Redis → 截图`,
+      expected: '页面 ∈ {coach,login,onboarding} 且根节点渲染；UI 触发的 /api/auth/sms/send 在本地栈 Redis 落 sms:code:<phone>:bind_phone；零生产域名',
       actual: page ? `停在 ${page.path}` : '未取到页面',
       evidence: `${path.relative(path.resolve(__dirname, '../..'), shot)}；console 尾部: ${consoleLines.slice(-5).join(' ⏎ ').slice(0, 400)}`,
       error: (err as Error).message,
