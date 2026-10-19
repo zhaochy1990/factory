@@ -40,8 +40,16 @@ function flattenPlaywright(json) {
   return specs.map((spec) => {
     const run = spec.tests?.[0]?.results?.[0] ?? {};
     const status = spec.ok ? 'passed' : run.status === 'skipped' ? 'skipped' : 'failed';
+    // Playwright 把注解挂在 tests[0].annotations 与 results[0].annotations 两处
+    // （内容相同）——合并去重。
     const ann = {};
-    for (const a of spec.annotations ?? []) ann[a.type] = (ann[a.type] ? ann[a.type] + '\n' : '') + a.description;
+    const seen = new Set();
+    for (const a of [...(spec.tests?.[0]?.annotations ?? []), ...(run.annotations ?? [])]) {
+      const key = `${a.type}|${a.description}`;
+      if (!a.description || seen.has(key)) continue;
+      seen.add(key);
+      ann[a.type] = (ann[a.type] ? ann[a.type] + '\n' : '') + a.description;
+    }
     return {
       suite: 'browser',
       name: spec.title,
@@ -49,7 +57,11 @@ function flattenPlaywright(json) {
       steps: ann.steps ?? '(见 spec)',
       expected: ann.expected ?? '(见 spec)',
       actual: status === 'passed' ? ann.actual ?? '通过' : (run.error?.message ?? ann.actual ?? '失败').split('\n')[0],
-      evidence: ann.evidence ?? (spec.tests?.[0]?.results?.[0]?.attachments ?? []).map((a) => a.name).join(', ') || '—',
+      evidence:
+        ann.evidence ??
+        ((spec.tests?.[0]?.results?.[0]?.attachments ?? [])
+          .map((a) => a.name)
+          .join(', ') || '—'),
       durationMs: run.duration ?? 0,
       error: run.error?.message?.split('\n').slice(0, 3).join(' ⏎ '),
     };
@@ -79,12 +91,13 @@ if (allCases.length === 0) {
 
 // ---- no-mock checklist -------------------------------------------------------
 const nm = env.noMock ?? {};
+const mpOk = nm.miniprogram === true || nm.miniprogram === 'true';
 const check = (ok, label) => `- [${ok ? 'x' : ' '}] ${label}`;
 const checklist = [
   check(nm.realBackend, '后端为真实容器（docker compose 起、ACR 钉定镜像，非进程/stub mock）'),
   check(nm.realDatastore, '断言直查真实 MySQL（127.0.0.1:3308 TCP，非内存假库）'),
   check(nm.realHttp, '浏览器用例打真实 HTTP（无 Playwright route/interception mock）'),
-  check(nm.miniprogram === true, nm.miniprogram === 'skipped' ? '小程序用例打本地 api-gateway（本次跳过）' : '小程序用例打本地 api-gateway :8082（无 mock 层）'),
+  check(mpOk, mpOk ? '小程序用例打本地 api-gateway :8082（无 mock 层）' : `小程序用例打本地 api-gateway（本次未绿：${String(nm.miniprogram)}）`),
   check(nm.noProd, '全程零生产域名/零生产数据（日志断言 stride-running.cn 零命中）'),
 ].join('\n');
 
