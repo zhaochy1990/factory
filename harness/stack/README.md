@@ -20,7 +20,11 @@
    `local/.env` 里 `MYSQL_HOST_PORT=3308`（容器侧仍是 3306）。直连 DSN：
    `mysql://auth:***@127.0.0.1:3308/auth`（stride / coach_agent 库同实例）。
 2. **stride-coach-api 宿主端口是 18888 不是 8888**——本机 Java 进程占了 8888
-   （`local/.env` 里 `COACH_API_HOST_PORT=18888`）。
+   （`local/.env` 里 `COACH_API_HOST_PORT=18888`）。**stride-devops 自己的
+   `up.sh` 把健康检查硬编码在 :8888**，所以它最后一步可能报
+   `stride-coach-api FAILED health check` 并非零退出——栈其实全绿。harness 的
+   `up.sh` 会容忍该误报并按真实端口（18888）复检（坑已记录，stride-devops
+   对 harness 只读所以不改它）。
 3. **裸 `docker compose` 会报 `STRIDE_WORKER_IMAGE_TAG is missing`**——compose
    只自动加载 `.env` 不加载共享钉定清单 `../versions.env`。要么先
    `set -a; . ../versions.env; set +a`，要么走本目录的 `stack_compose` /
