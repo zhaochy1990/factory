@@ -7,7 +7,8 @@
 #   dev/qa → 引用 haiku 档 → glm-5.3-flash（性价比档）
 
 roles:
-  lily: { tier: strong, claude_alias: sonnet, model: glm-5.3 }
+  lily: { tier: fast, claude_alias: haiku, model: glm-5.3-flash, note: 协调者；单题深想走 strategist 子代理(sonnet) }
+  architect: { tier: strong, claude_alias: sonnet, model: glm-5.3, note: 技术设计专员 }
   dev: { tier: fast, claude_alias: haiku, model: glm-5.3-flash }
   qa: { tier: fast, claude_alias: haiku, model: glm-5.3-flash }
 
